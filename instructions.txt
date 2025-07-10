@@ -1,0 +1,17 @@
+####### installation ######
+1. langchain-text-splitters
+2. langchain-community
+3. langgraph
+4. langchain-ollama
+5 langchain-pinecone
+5. python-dotenv
+
+
+####### langsmith ######
+As applications get more complex, it becomes crucial to inspect what exactly is going on inside your chain or agent.
+
+
+####### Components #######
+1. select chat model
+2. select embeddings model
+3. select vector store
