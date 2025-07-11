@@ -73,6 +73,18 @@ all_splits = text_splitter.split_documents(docs)
 
 print(f"Split blog post into {len(all_splits)} sub-documents")
 
+# update metadata
+total_documents = len(all_splits)
+third = total_documents // 3
+
+for i, document in enumerate(all_splits):
+    if i < third:
+        document.metadata["section"] = "beginning"
+    elif i < 2*third:
+        document.metadata["section"] = "middle"
+    else:
+        document.metadata["section"] = "end"
+
 
 ######################### storing documents #######################################
 
@@ -84,3 +96,88 @@ print(document_ids[:3])
 
 # 2. Retieval and generation
 
+from langchain import hub
+
+prompt = hub.pull("rlm/rag-prompt")
+
+example_messages = prompt.invoke(
+    {
+        "context": "(context goes here)",
+        "question": "(question goes here)" 
+    }
+).to_messages()
+
+assert len(example_messages) == 1
+print(example_messages[0].content)
+
+
+###################################################################################
+
+# To use langgraph, we need to define
+
+# 1. The state of our application
+
+from langchain_core.documents import Document
+from typing_extensions import TypedDict, List, Annotated
+
+from typing import Literal
+
+class Search(TypedDict):
+    """ Search query """
+
+    query: Annotated[str, ..., "Search query to run"]
+    section: Annotated[
+        Literal["beginning", "medium", "end"], ... , "Section to query"
+    ]
+
+class State(TypedDict):
+    question: str
+    query: Search
+    context: List[Document]
+    answer: str
+
+
+# 2. Nodes (application steps)
+
+def analyze_query(state: State):
+    structured_llm = llm.with_structured_output(Search)
+    query = structured_llm.invoke(state["question"])
+    return {"query": query}
+
+def retrieve(state: State):
+    query = state["query"]
+    retrieved_docs = vector_store.similarity_search(
+        query["query"],
+        # filter=lambda doc: doc.metadata.get("section") == query["section"],
+        filter={"section": query["section"]},
+        )
+    return {"context": retrieved_docs}
+
+def generate(state: State):
+    docs_content = "\n\n".join(doc.page_content for doc in state["context"])
+    messages = prompt.invoke({"question": state["question"], "context": docs_content})
+    response = llm.invoke(messages)
+    return {"answer": response.content}
+
+
+# 3. Control flow
+
+from langgraph.graph import StateGraph, START
+
+graph_builder = StateGraph(State).add_sequence([analyze_query, retrieve, generate])
+graph_builder.add_edge(START, "analyze_query")
+graph = graph_builder.compile()
+
+
+#############################################################################
+# Test your application
+#############################################################################
+
+# result = graph.invoke({"question": "What is Task Decomposition?"})
+# print(f'Context: {result["context"]}')
+# print(f'Answer: {result["answer"]}')
+for step in graph.stream(
+    {"question": "What does the end of the post say about Task Decomposition?"},
+    stream_mode="updates",
+):
+    print(f"{step}\n\n----------------\n")
